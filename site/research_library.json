@@ -1,0 +1,246 @@
+{
+  "cases": [
+    {
+      "id": "C01",
+      "title": "Centered impact / shell energy transport",
+      "status": "ARCHIVED",
+      "dataset_key": "stage12_baseline",
+      "dataset": "stage12_baseline.csv",
+      "modules": "hemisphere.py, surface_contact.py, transport3d.py",
+      "equations": "m r\u00a8 = Fspring + Fdamp + Fcontact; E0 = Kprojectile + Kshell + U + Q + Econtact + residual",
+      "question": "Reference impact; track contact penetration, projectile kinetic energy, structural energy and energy closure.",
+      "measurements": "Peak overlap; projectile rebound; peak shell kinetic energy; residual magnitude.",
+      "limitations": "Mesh/timestep sensitivity and conservation checks; contact is penalty-based, not experimentally calibrated."
+    },
+    {
+      "id": "C02",
+      "title": "Off-axis versus polar impact",
+      "status": "ARCHIVED",
+      "dataset_key": "off_axis",
+      "dataset": "off_axis.csv",
+      "modules": "stage10_extended.py, surface_contact.py",
+      "equations": "Fcontact = kc max(0,\u03b4)n; \u03c4 = r \u00d7 F; \u0394p = \u222bF dt",
+      "question": "Compare impact location and asymmetric load transfer; polar and off-axis histories are stored.",
+      "measurements": "Contact overlap; peak voltage; resistor power; energy residual.",
+      "limitations": "Cross-case comparability requires checking identical geometry, initial energy and solver settings."
+    },
+    {
+      "id": "C03",
+      "title": "Passive damping versus adaptive damping",
+      "status": "ARCHIVED",
+      "dataset_key": "adaptive",
+      "dataset": "adaptive.csv",
+      "modules": "adaptive.py, recovery.py",
+      "equations": "Fd = \u2212c(t) \u0394v; Q = \u222bc(t)(\u0394v)\u00b2dt; cmin \u2264 c(t) \u2264 cmax",
+      "question": "Investigate controller-dependent dissipation in the earlier lattice model.",
+      "measurements": "Damping trajectory; projectile kinetic energy; dissipated heat; residual.",
+      "limitations": "Earlier lattice model is not the Stage 12 hemispherical solver; avoid cross-model causal claims."
+    },
+    {
+      "id": "C04",
+      "title": "Electromechanical recovery and load coupling",
+      "status": "ARCHIVED",
+      "dataset_key": "off_axis",
+      "dataset": "off_axis.csv",
+      "modules": "coupling.py, recovery.py, stage10_extended.py",
+      "equations": "m x\u00a8+c x\u02d9+kx+\u03b8V=F; C V\u02d9+V/R=\u03b8x\u02d9; E_R=\u222bV\u00b2/R dt",
+      "question": "Quantify reduced-order electrical port behavior and load energy under impact.",
+      "measurements": "Resistor power; resistor energy; capacitor energy; max voltage.",
+      "limitations": "Idealized transducer/storage model; no measured device efficiency or power electronics losses."
+    },
+    {
+      "id": "C05",
+      "title": "Deployment under force and power limits",
+      "status": "ARCHIVED",
+      "dataset_key": "deployment_scan",
+      "dataset": "deployment_scan.csv",
+      "modules": "deployment.py",
+      "equations": "P(t)=\u03a3Fi(t)\u00b7vi(t); W+=\u222bmax(P(t),0)dt; |Fi|\u2264Fmax, P\u2264Pmax",
+      "question": "Evaluate prescribed flat-to-dome motion against illustrative actuator constraints.",
+      "measurements": "Peak power; peak force; positive work; feasible flag.",
+      "limitations": "Archived scan exceeds illustrative limits; this is a negative feasibility result."
+    },
+    {
+      "id": "C06",
+      "title": "Geometry, timestep and coupling comparison",
+      "status": "ARCHIVED",
+      "dataset_key": "matched_study",
+      "dataset": "matched_study.csv",
+      "modules": "stage11.py, final_validation.py",
+      "equations": "\u03b5E=Einitial+Wexternal\u2212(K+U+Q+Eelectric); \u0394q=q(h)\u2212q(h/2)",
+      "question": "Compare matched configurations, integration steps and electrical coupling assumptions.",
+      "measurements": "Stored electrical energy; final speed; energy residual; timestep differences.",
+      "limitations": "A limited numerical comparison is not proof of mesh convergence."
+    },
+    {
+      "id": "C07",
+      "title": "Coupling sensitivity and electrical output",
+      "status": "ARCHIVED",
+      "dataset_key": "parameter_study",
+      "dataset": "parameter_study.csv",
+      "modules": "coupling.py, stage11.py",
+      "equations": "S\u03b8\u2248\u0394output/\u0394\u03b8; Eout=\u222bPload dt; \u03b5storage=Ein\u2212Eout\u2212\u0394Estored",
+      "question": "Parameter sweep over coupling and integration timestep, using existing CSV output.",
+      "measurements": "Final velocity; electrical output; stored energy; storage residual.",
+      "limitations": "Sensitivity within simulated parameter ranges only; not experimentally identified parameters."
+    },
+    {
+      "id": "C08",
+      "title": "Mesh refinement / discretization error",
+      "status": "ARCHIVED",
+      "dataset_key": "convergence",
+      "dataset": "convergence.csv",
+      "modules": "stage11.py, final_validation.py",
+      "equations": "e_h=|q_h\u2212q_h/2|; p\u2248log2(e_h/e_h/2) when three resolutions exist",
+      "question": "Inspect recorded coarse/fine differences and determine which convergence claims are supported.",
+      "measurements": "Velocity difference; electrical energy difference; coarse/fine energy residual.",
+      "limitations": "Only available refinement comparisons are reported; no invented convergence order."
+    },
+    {
+      "id": "C09",
+      "title": "Sequential impacts and load accumulation",
+      "status": "PROTOCOL",
+      "dataset_key": null,
+      "dataset": null,
+      "modules": "surface_contact.py, transport3d.py",
+      "equations": "m r\u00a8 = Fint + \u03a3k Fcontact,k; D=\u03a3cycle g(\u03b5max,\u0394\u03b5) [requires chosen damage law]",
+      "question": "Proposed repeat-impact experiment with controlled inter-impact timing and load history.",
+      "measurements": "Peak force per impact; residual deformation; accumulated dissipation.",
+      "limitations": "No validated damage model or archived sequential-impact dataset is supplied."
+    },
+    {
+      "id": "C10",
+      "title": "Spatial stiffness and damping allocation",
+      "status": "PROTOCOL",
+      "dataset_key": null,
+      "dataset": null,
+      "modules": "hemisphere.py, adaptive.py, transport3d.py",
+      "equations": "min_{k,c} [w1 Fpeak+w2 umax+w3 mass] subject to kmin\u2264k\u2264kmax, c\u22650",
+      "question": "Proposed distribution study on a constrained shell network with identical projectile energy.",
+      "measurements": "Pareto trade-offs; force histories; local deformation; parameter maps.",
+      "limitations": "Requires optimizer, gradient checks and repeated forward solves; not yet computed."
+    },
+    {
+      "id": "C11",
+      "title": "Robustness to uncertain material properties",
+      "status": "PROTOCOL",
+      "dataset_key": null,
+      "dataset": null,
+      "modules": "stage11.py, final_validation.py",
+      "equations": "Y=f(k,c,\u03bc,\u03b8); Var(Y)=E[(Y\u2212E[Y])\u00b2]; Si=Var(E[Y|Xi])/Var(Y)",
+      "question": "Proposed uncertainty study for material parameters, contact stiffness and damping.",
+      "measurements": "Replicate distributions; failure rates; confidence intervals; sensitivity rankings.",
+      "limitations": "Requires defensible input distributions and sufficient samples; no results claimed."
+    },
+    {
+      "id": "C12",
+      "title": "Reduced-order surrogate versus full shell solver",
+      "status": "PROTOCOL",
+      "dataset_key": null,
+      "dataset": null,
+      "modules": "hemisphere.py, transport3d.py",
+      "equations": "M q\u00a8+C q\u02d9+Kq=Bu; q\u2248\u03a6r a; Mr=\u03a6r\u1d40M\u03a6r",
+      "question": "Proposed speed/accuracy benchmark for modal reduction under localized contact loading.",
+      "measurements": "Runtime; trajectory error; retained modes; conservation residual.",
+      "limitations": "Requires basis construction and out-of-sample validation; not yet implemented."
+    }
+  ],
+  "methods": [
+    {
+      "id": "M01",
+      "title": "Discrete shell topology",
+      "modules": "hemisphere.py",
+      "description": "Triangular hemispherical network, connectivity and equatorial constraints.",
+      "equations": "x_i\u2208R\u00b3; \u2113ij=\u2016xj\u2212xi\u2016; Fij = kij(\u2113ij\u2212\u2113ij\u2070)eij",
+      "verification": "Inspect connectivity, isolated nodes, element orientation and mesh sensitivity."
+    },
+    {
+      "id": "M02",
+      "title": "Time integration",
+      "modules": "core.py, physical.py",
+      "description": "Numerical integration of particle and structural motion.",
+      "equations": "v_{n+1}=v_n+\u0394t M\u207b\u00b9F_n; x_{n+1}=x_n+\u0394t v_{n+1}",
+      "verification": "Compare timestep refinement, stability and energy drift; do not equate integration with validation."
+    },
+    {
+      "id": "M03",
+      "title": "Penalty contact",
+      "modules": "surface_contact.py",
+      "description": "Contact response under local overlap; surface-based interaction.",
+      "equations": "\u03b4=max(0,rp\u2212d); Fn=kc \u03b4 n (+ dissipative term where implemented)",
+      "verification": "Inspect overlap, stiffness sensitivity, contact duration and impulse."
+    },
+    {
+      "id": "M04",
+      "title": "Structural transport",
+      "modules": "transport3d.py",
+      "description": "Wave and energy transport across a 3D connected spring network.",
+      "equations": "Ekin=\u00bd\u03a3mi\u2016vi\u2016\u00b2; U=\u00bd\u03a3kij(\u2113ij\u2212\u2113ij\u2070)\u00b2",
+      "verification": "Measure energy partition and transport; node histories required for spatial validation."
+    },
+    {
+      "id": "M05",
+      "title": "Damping and control",
+      "modules": "adaptive.py",
+      "description": "Adaptive dissipation in a reduced lattice model.",
+      "equations": "Fd=\u2212c(t)\u0394v; Q=\u222bc(t)(\u0394v)\u00b2dt",
+      "verification": "Compare matched passive and controlled runs, with actuation/sensing assumptions."
+    },
+    {
+      "id": "M06",
+      "title": "Field coupling",
+      "modules": "field.py, coupling.py",
+      "description": "Phenomenological and SI field-coupling tests, including weak induced-dipole effects.",
+      "equations": "Finduced\u2248\u00bd\u03b1\u2207|E|\u00b2 (under applicable dipole approximation)",
+      "verification": "Check force scale and dimensional consistency; no macroscopic free-standing barrier demonstrated."
+    },
+    {
+      "id": "M07",
+      "title": "Piezoelectric coupling",
+      "modules": "coupling.py, stage10_extended.py",
+      "description": "Single-mode electromechanical port, resistive load and storage accounting.",
+      "equations": "m x\u00a8+c x\u02d9+kx+\u03b8V=F; C V\u02d9+V/R=\u03b8x\u02d9",
+      "verification": "Verify electrical/mechanical work balance and parameter sensitivity."
+    },
+    {
+      "id": "M08",
+      "title": "Deployment inverse dynamics",
+      "modules": "deployment.py",
+      "description": "Prescribed shell deployment with actuator load estimation.",
+      "equations": "\u03c4=M(q)q\u00a8+C(q,q\u02d9)+g(q)+Fconstraint",
+      "verification": "Compare peak force, peak power and work against explicit actuator limits."
+    },
+    {
+      "id": "M09",
+      "title": "Energy bookkeeping",
+      "modules": "recovery.py, final_validation.py",
+      "description": "Conservation residuals and dissipation/recovery channels.",
+      "equations": "\u03b5=Einitial+Wact\u2212K\u2212U\u2212Q\u2212Eelectric",
+      "verification": "Plot residual versus time and step size; report both absolute and relative error."
+    },
+    {
+      "id": "M10",
+      "title": "Verification and matched comparisons",
+      "modules": "stage11.py, final_validation.py",
+      "description": "Comparative numerical studies, sensitivity and regression tests.",
+      "equations": "\u0394q=q(\u0394t)\u2212q(\u0394t/2); rE=|\u03b5|/max(|E0|,scale)",
+      "verification": "Record parameter parity, timestep, solver settings and test coverage."
+    },
+    {
+      "id": "M11",
+      "title": "Sparse implicit structural solver",
+      "modules": "NOT IMPLEMENTED",
+      "description": "Candidate future method for stiffness-dominated networks.",
+      "equations": "(M+\u0394t C+\u0394t\u00b2 K)\u0394v = b (linearized form)",
+      "verification": "Not in current repository; would need implementation and benchmark."
+    },
+    {
+      "id": "M12",
+      "title": "Reduced-order / surrogate model",
+      "modules": "NOT IMPLEMENTED",
+      "description": "Candidate future modal reduction for repeated impact studies.",
+      "equations": "q\u2248\u03a6r a; Mr=\u03a6r\u1d40M\u03a6r",
+      "verification": "Not in current repository; no performance claim."
+    }
+  ]
+}
