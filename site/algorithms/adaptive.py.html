@@ -1,0 +1,89 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>INTERSPACE / SOURCE</title><link rel="stylesheet" href="../style.css"><main><p><a href="../index.html#algorithms">← WORKSTATION / ALGORITHMS</a></p><h1>adaptive.py</h1><p>Exact source from the Stage 12 research archive. Code is provided for inspection, not executed in-browser.</p><pre class="sourcecode">&quot;&quot;&quot;Stage 6: constrained feedback harvesting in a dimensionless lattice.
+
+A mechanical dashpot is a phenomenological surrogate, not an EM field.
+Storage saturation reduces electrical loading and therefore effective damping.
+&quot;&quot;&quot;
+from dataclasses import dataclass
+import numpy as np
+from .core import Parameters, make_lattice, forces_and_potential
+from .recovery import dashpot_forces
+
+@dataclass(frozen=True)
+class AdaptiveConfig:
+    mode: str = &#x27;adaptive&#x27;  # passive, fixed, adaptive
+    dt: float = 0.0005
+    duration: float = 5.0
+    sample_every: int = 20
+    max_damping: float = 1.5
+    fixed_damping: float = 0.75
+    efficiency: float = 0.7
+    capacity: float = 1.0
+    load_floor: float = 0.0  # saturated storage -&gt; zero harvesting load
+    sensor_gain: float = 2.0
+    response_time: float = 0.03
+    max_slew: float = 10.0
+    speed: float = 1.0
+
+
+def run_adaptive(cfg=AdaptiveConfig(), params=Parameters()):
+    if cfg.mode not in (&#x27;passive&#x27;,&#x27;fixed&#x27;,&#x27;adaptive&#x27;): raise ValueError(&#x27;Invalid mode&#x27;)
+    if cfg.dt&lt;=0 or cfg.duration&lt;=0 or cfg.sample_every&lt;1 or cfg.response_time&lt;=0: raise ValueError(&#x27;Invalid timing&#x27;)
+    if cfg.max_damping&lt;0 or not 0&lt;=cfg.fixed_damping&lt;=cfg.max_damping or cfg.capacity&lt;0: raise ValueError(&#x27;Invalid damping/capacity&#x27;)
+    if not 0&lt;=cfg.efficiency&lt;=1 or not 0&lt;=cfg.load_floor&lt;=1 or cfg.sensor_gain&lt;0 or cfg.max_slew&lt;0: raise ValueError(&#x27;Invalid controls&#x27;)
+    state=make_lattice(projectile_speed=cfg.speed,params=params)
+    _,u0=forces_and_potential(state,params)
+    initial=float(0.5*np.sum(state.masses[:,None]*state.velocities**2)+u0)
+    p0=np.sum(state.masses[:,None]*state.velocities,axis=0)
+    stored=heat=0.0
+    command=0.0
+    records=[]
+    n=int(round(cfg.duration/cfg.dt))
+    if n&lt;1: raise ValueError(&#x27;No integration steps&#x27;)
+    def record():
+        _,u=forces_and_potential(state,params)
+        ke=0.5*np.sum(state.masses[:,None]*state.velocities**2)
+        pke=0.5*state.masses[-1]*np.dot(state.velocities[-1],state.velocities[-1])
+        momentum=np.sum(state.masses[:,None]*state.velocities,axis=0)
+        records.append(dict(time=float(state.time),projectile_x=float(state.positions[-1,0]),
+          projectile_vx=float(state.velocities[-1,0]),projectile_ke=float(pke),lattice_ke=float(ke-pke),
+          mechanical=float(ke+u),stored=float(stored),heat=float(heat),
+          damping=float(command),energy_residual=float(ke+u+stored+heat-initial),
+          momentum_residual=float(np.linalg.norm(momentum-p0))))
+    record()
+    for i in range(n):
+        f0,_=forces_and_potential(state,params)
+        vh=state.velocities+0.5*cfg.dt*f0/state.masses[:,None]
+        state.positions+=cfg.dt*vh
+        f1,_=forces_and_potential(state,params)
+        state.velocities=vh+0.5*cfg.dt*f1/state.masses[:,None]
+        # Feedback senses relative bond motion, rather than oracle knowledge of future impact.
+        _,relative_power=dashpot_forces(state,1.0)
+        if cfg.mode==&#x27;passive&#x27;: target=0.0
+        elif cfg.mode==&#x27;fixed&#x27;: target=cfg.fixed_damping
+        else: target=cfg.max_damping*(1-np.exp(-cfg.sensor_gain*np.sqrt(relative_power)))
+        if cfg.mode==&#x27;adaptive&#x27;:
+            requested=command+cfg.dt*(target-command)/cfg.response_time
+            command+=np.clip(requested-command,-cfg.max_slew*cfg.dt,cfg.max_slew*cfg.dt)
+            command=float(np.clip(command,0,cfg.max_damping))
+        else: command=target
+        # Electrical load falls with storage fill. A saturated store cannot maintain
+        # full harvesting damping without an external dump/load.
+        fill=1.0 if cfg.capacity==0 else min(1.0,stored/cfg.capacity)
+        load=cfg.load_floor+(1-cfg.load_floor)*(1-fill)
+        effective=command*load
+        if effective:
+            fd,_=dashpot_forces(state,effective)
+            before=0.5*np.sum(state.masses[:,None]*state.velocities**2)
+            vnew=state.velocities+cfg.dt*fd/state.masses[:,None]
+            after=0.5*np.sum(state.masses[:,None]*vnew**2)
+            extracted=float(before-after)
+            if extracted &lt; -1e-11: raise RuntimeError(&#x27;Unstable dissipative step; reduce dt&#x27;)
+            extracted=max(0.0,extracted)
+            accepted=min(cfg.efficiency*extracted,max(0.0,cfg.capacity-stored))
+            stored+=accepted
+            heat+=extracted-accepted
+            state.velocities=vnew
+        state.time+=cfg.dt
+        if (i+1)%cfg.sample_every==0 or i==n-1: record()
+    return records,state
+</pre></main></html>

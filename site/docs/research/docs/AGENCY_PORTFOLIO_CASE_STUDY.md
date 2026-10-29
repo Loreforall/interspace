@@ -1,0 +1,15 @@
+# INTERSPACE — Computational Impact and Energy Transfer Research
+
+**Discipline:** computational mechanics, multiphysics modeling, numerical verification, energy harvesting.
+
+**Problem:** Assess a ring-supported hemispherical lattice as an impact-transmission and electromechanical energy-recovery architecture. Evaluate deployment constraints and compare baseline structures without assuming speculative field interactions are real.
+
+**Engineering deliverables:** Python simulation modules for lattice impact, effective coupling, 3D dome dynamics, triangular surface contact, deployment power audits, piezoelectric load models and validation scripts; reproducible numerical figures and explicit model limitations.
+
+**Methods:** Morse potentials, mass-spring-damper networks, Newtonian dynamics, penalty contact, reciprocal piezoelectric lumped models, energy/momentum audits and parameter sweeps.
+
+**Result:** A working research prototype with tested mathematical components. Illustrative deployment cases violate assumed power/force limits; field-mediated free-standing impact arrest remains unsubstantiated. No material-calibrated performance or experimental efficiency is claimed.
+
+**Potential applications of transferable algorithms:** impact-protective structures, instrumented membranes, vibration-energy harvesting, numerical design of deployable devices, coupled mechanical/electrical simulation.
+
+**Suggested portfolio screenshots:** mesh geometry with node IDs; impact trajectory; conservation residual; actuator power trace; voltage/energy flow; benchmark tables. Avoid aestheticized force-field imagery.

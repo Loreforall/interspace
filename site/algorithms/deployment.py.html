@@ -1,0 +1,68 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>INTERSPACE / SOURCE</title><link rel="stylesheet" href="../style.css"><main><p><a href="../index.html#algorithms">← WORKSTATION / ALGORITHMS</a></p><h1>deployment.py</h1><p>Exact source from the Stage 12 research archive. Code is provided for inspection, not executed in-browser.</p><pre class="sourcecode">&quot;&quot;&quot;Stage 9: energy-accounted, prescribed-trajectory dome deployment reference.
+
+A kinematic reference, not a validated deployable actuator. The shell&#x27;s moving
+nodes are commanded along a smooth path; ideal actuator forces are inferred
+from Newton&#x27;s law and the network force. Ring nodes remain stationary.
+&quot;&quot;&quot;
+from dataclasses import dataclass
+import numpy as np
+from .hemisphere import DomeConfig, mesh, internal
+
+@dataclass(frozen=True)
+class DeploymentConfig:
+    dome: DomeConfig = DomeConfig()
+    activation_time_s: float = 0.08
+    duration_s: float = 0.10
+    dt_s: float = 0.0001
+    max_total_power_W: float = 250.0
+    max_total_force_N: float = 1000.0
+    stowed_height_fraction: float = 0.02
+
+def quintic(t):
+    &quot;&quot;&quot;Position, first and second time derivatives on unit interval.&quot;&quot;&quot;
+    t=np.clip(t,0.,1.)
+    return 10*t**3-15*t**4+6*t**5, 30*t**2-60*t**3+30*t**4, 60*t-180*t**2+120*t**3
+
+def simulate(cfg=DeploymentConfig()):
+    if cfg.activation_time_s&lt;=0 or cfg.dt_s&lt;=0 or cfg.duration_s&lt;cfg.activation_time_s:
+        raise ValueError(&#x27;Invalid timing&#x27;)
+    if not (0&lt;=cfg.stowed_height_fraction&lt;1):
+        raise ValueError(&#x27;Invalid stowed height fraction&#x27;)
+    full,edges,_,fixed=mesh(cfg.dome)
+    stowed=full.copy(); stowed[:,2]*=cfg.stowed_height_fraction
+    # The stowed configuration defines the initial stress-free network.
+    rest=np.linalg.norm(stowed[edges[:,1]]-stowed[edges[:,0]],axis=1)
+    delta=full-stowed
+    times=np.arange(0,cfg.duration_s+cfg.dt_s/2,cfg.dt_s)
+    rows=[]; net_work=0.; supplied=0.; regenerated=0.; heat=0.
+    last_t=0.;last_power=0.;max_power=0.;max_force=0.
+    for t in times:
+        q,v,a=quintic(t/cfg.activation_time_s)
+        pos=stowed+q*delta
+        vel=v*delta/cfg.activation_time_s
+        acc=a*delta/cfg.activation_time_s**2
+        vel[fixed]=0.;acc[fixed]=0.
+        internal_force,elastic,heat_rate=internal(pos,vel,edges,rest,cfg.dome.stiffness,cfg.dome.damping)
+        actuator=cfg.dome.node_mass*acc-internal_force
+        actuator[fixed]=0.
+        power=float(np.sum(actuator*vel))
+        force_norm=float(np.linalg.norm(actuator,axis=1).sum())
+        if t&gt;0:
+            dt=t-last_t
+            net_work+=0.5*(last_power+power)*dt
+            supplied+=0.5*(max(0,last_power)+max(0,power))*dt
+            regenerated+=0.5*(max(0,-last_power)+max(0,-power))*dt
+            heat+=heat_rate*dt # first-order heat quadrature; residual converges under refinement
+        kinetic=0.5*cfg.dome.node_mass*np.sum(vel[~fixed]**2)
+        residual=net_work-(kinetic+elastic+heat)
+        rows.append((t,q,power,force_norm,net_work,supplied,regenerated,kinetic,elastic,heat,residual))
+        max_power=max(max_power,max(0,power));max_force=max(max_force,force_norm)
+        last_t=t;last_power=power
+    return {&#x27;columns&#x27;:[&#x27;time_s&#x27;,&#x27;deployment_fraction&#x27;,&#x27;actuator_power_W&#x27;,&#x27;sum_actuator_force_N&#x27;,&#x27;net_work_J&#x27;,&#x27;positive_work_J&#x27;,&#x27;negative_work_J&#x27;,&#x27;kinetic_J&#x27;,&#x27;elastic_J&#x27;,&#x27;heat_J&#x27;,&#x27;energy_residual_J&#x27;],
+            &#x27;history&#x27;:np.array(rows), &#x27;initial&#x27;:stowed,&#x27;deployed&#x27;:full,&#x27;edges&#x27;:edges,
+            &#x27;max_positive_power_W&#x27;:max_power,&#x27;max_sum_force_N&#x27;:max_force,
+            &#x27;power_limit_pass&#x27;:max_power&lt;=cfg.max_total_power_W,
+            &#x27;force_limit_pass&#x27;:max_force&lt;=cfg.max_total_force_N,
+            &#x27;final_fraction&#x27;:float(rows[-1][1]),
+            &#x27;note&#x27;:&#x27;Ideal inverse-dynamics actuator model. No motor geometry, material calibration, collision, or deployment stability proven.&#x27;}
+</pre></main></html>

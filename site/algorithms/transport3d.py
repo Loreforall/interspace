@@ -1,0 +1,113 @@
+"""Stage 10: off-axis contact, support energy flux and reciprocal piezoelectric load.
+
+Reduced-order mass-spring dome. The support ring is fixed. A piezoelectric
+transducer on each final meridional edge exchanges mechanical/electrical energy.
+Electrical energy is dissipated in an explicit resistor, not stored in a battery.
+"""
+from dataclasses import dataclass, replace
+import numpy as np
+from .hemisphere import DomeConfig, mesh, internal
+
+@dataclass(frozen=True)
+class TransportConfig:
+    dome: DomeConfig = DomeConfig(duration=0.024, dt=1e-5)
+    impact_phi: float = 0.38
+    impact_theta: float = 0.65
+    capacitance_F: float = 2e-6
+    coupling_N_per_V: float = 0.004
+    resistance_ohm: float = 400.0
+    support_damping_Ns_m: float = 0.3
+    initial_gap_m: float = 0.0004
+
+
+def run(cfg=TransportConfig(), sample_every=10):
+    d=cfg.dome
+    if d.dt<=0 or d.duration<=0 or d.node_mass<=0 or d.projectile_mass<=0:
+        raise ValueError('Invalid masses or timing')
+    if cfg.capacitance_F<=0 or cfg.resistance_ohm<=0 or cfg.support_damping_Ns_m<0:
+        raise ValueError('Invalid transducer')
+    if not (0<=cfg.impact_phi<np.pi/2):
+        raise ValueError('Impact angle must be on dome excluding fixed ring')
+    pos0,edges,rest,fixed=mesh(d)
+    # Choose nearest *free* surface node to specified polar position.
+    target=np.array([d.radius*np.sin(cfg.impact_phi)*np.cos(cfg.impact_theta),
+                     d.radius*np.sin(cfg.impact_phi)*np.sin(cfg.impact_theta),
+                     d.radius*np.cos(cfg.impact_phi)])
+    free=np.where(~fixed)[0]
+    hit=int(free[np.argmin(np.linalg.norm(pos0[free]-target,axis=1))])
+    # Projectile sphere travels vertically downward and contacts the selected node.
+    pos=pos0.copy();vel=np.zeros_like(pos)
+    pz=pos[hit,2]+d.projectile_radius+cfg.initial_gap_m
+    pv=-d.impact_speed
+    # Edges with exactly one endpoint fixed are the transducer interface.
+    support_mask=fixed[edges[:,0]]^fixed[edges[:,1]]
+    support_edges=edges[support_mask]
+    mobile=np.where(fixed[support_edges[:,0]],support_edges[:,1],support_edges[:,0])
+    anchor=np.where(fixed[support_edges[:,0]],support_edges[:,0],support_edges[:,1])
+    count=len(mobile); voltage=np.zeros(count)
+    heat=0.; load=0.; support_heat=0.;outgoing_flux=0.;initial_ke=.5*d.projectile_mass*pv**2
+    rows=[]; nsteps=round(d.duration/d.dt)
+    # Per-latitude-band kinetic energy traces for threshold wave-arrival diagnostics.
+    # A wavefront is operationally defined by the first threshold crossing,
+    # not by a continuum stress-wave solution.
+    band_indices=np.zeros(len(pos0),dtype=int)
+    band_indices[1:]=1+np.repeat(np.arange(d.rings),d.sectors)
+    band_kinetic=[]; band_times=[]
+    for n in range(nsteps+1):
+        f,elastic,bulk_heat_rate=internal(pos,vel,edges,rest,d.stiffness,d.damping)
+        diff=pos[mobile]-pos[anchor]
+        norm=np.maximum(np.linalg.norm(diff,axis=1),1e-12)
+        direction=diff/norm[:,None]
+        speed=np.sum(vel[mobile]*direction,axis=1)
+        # reciprocal force / electrical equation:
+        # F = -theta*V*n, C Vdot = theta*speed - V/R
+        piezo_force=-cfg.coupling_N_per_V*voltage[:,None]*direction
+        np.add.at(f,mobile,piezo_force-cfg.support_damping_Ns_m*speed[:,None]*direction)
+        support_heat_rate=cfg.support_damping_Ns_m*np.sum(speed**2)
+        # Mechanical power leaving the free shell via spring/dashpot links
+        # adjacent to the fixed support (signed; can flow back).
+        support_rest=np.linalg.norm(pos0[mobile]-pos0[anchor],axis=1)
+        support_tension=d.stiffness*(norm-support_rest)+d.damping*speed
+        outgoing_flux_rate=float(np.sum(support_tension*speed))
+        load_rate=np.sum(voltage**2)/cfg.resistance_ohm
+        # Node-contact, vertical-only reduced-order model; lateral shear excluded.
+        overlap=max(0.,pos[hit,2]+d.projectile_radius-pz)
+        approach=max(0.,vel[hit,2]-pv)
+        contact=d.contact_stiffness*overlap+d.contact_damping*approach if overlap>0 else 0.
+        f[hit,2]-=contact
+        shell_ke=.5*d.node_mass*np.sum(vel[~fixed]**2)
+        projectile_ke=.5*d.projectile_mass*pv**2
+        electric=.5*cfg.capacitance_F*np.sum(voltage**2)
+        contact_e=.5*d.contact_stiffness*overlap**2
+        total=shell_ke+projectile_ke+elastic+contact_e+electric+heat+load+support_heat
+        if n%sample_every==0 or n==nsteps:
+            band_kinetic.append([float(.5*d.node_mass*np.sum(vel[(band_indices==j)&(~fixed)]**2)) for j in range(d.rings+1)])
+            band_times.append(n*d.dt)
+            rows.append((n*d.dt,pz,pv,projectile_ke,shell_ke,elastic,contact_e,electric,heat,support_heat,load,total-initial_ke,overlap,load_rate,float(np.max(np.abs(voltage))) if count else 0.))
+        if n==nsteps:break
+        # Explicit source terms and symplectic mechanical update.
+        heat+=d.dt*(bulk_heat_rate+d.contact_damping*approach**2*(overlap>0))
+        support_heat+=d.dt*support_heat_rate
+        outgoing_flux+=d.dt*outgoing_flux_rate
+        load+=d.dt*load_rate
+        voltage+=d.dt*(cfg.coupling_N_per_V*speed-voltage/cfg.resistance_ohm)/cfg.capacitance_F
+        vel[~fixed]+=d.dt*f[~fixed]/d.node_mass
+        pos[~fixed]+=d.dt*vel[~fixed]
+        pos[fixed]=pos0[fixed];vel[fixed]=0.
+        pv+=d.dt*contact/d.projectile_mass
+        pz+=d.dt*pv
+    cols=['time_s','projectile_z_m','projectile_v_m_s','projectile_ke_J','shell_ke_J','elastic_J','contact_J','electrical_capacitor_J','bulk_heat_J','support_heat_J','resistor_energy_J','energy_residual_J','overlap_m','resistor_power_W','max_abs_voltage_V']
+    h=np.array(rows)
+    bk=np.asarray(band_kinetic)
+    # Threshold scaled to the initial projectile energy. Fixed equator has
+    # zero kinetic energy and therefore cannot report a wave arrival.
+    threshold=1e-7*initial_ke
+    arrivals=[]
+    for j in range(d.rings+1):
+        crossed=np.where(bk[:,j]>threshold)[0]
+        arrivals.append(float(band_times[crossed[0]]) if len(crossed) else None)
+    return dict(band_kinetic_energy_J=bk,band_times_s=band_times,
+                band_wave_arrival_s=arrivals,wave_threshold_J=threshold,columns=cols,history=h,impact_node=hit,impact_node_position_m=pos0[hit].tolist(),support_transducers=count,
+                initial_impact_energy_J=initial_ke,net_support_link_flux_J=float(outgoing_flux),load_energy_J=float(load),max_abs_energy_residual_J=float(np.max(np.abs(h[:,11]))),
+                final_projectile_velocity_m_s=float(pv),
+                note='Reduced-order 3D shell; impact at nearest node, vertical contact only; ring fixed. Resistor dissipates electricity, no battery storage or deployable-actuator coupling.')

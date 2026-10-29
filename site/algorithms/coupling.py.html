@@ -1,0 +1,116 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>INTERSPACE / SOURCE</title><link rel="stylesheet" href="../style.css"><main><p><a href="../index.html#algorithms">← WORKSTATION / ALGORITHMS</a></p><h1>coupling.py</h1><p>Exact source from the Stage 12 research archive. Code is provided for inspection, not executed in-browser.</p><pre class="sourcecode">&quot;&quot;&quot;Stage 3: prescribed, phenomenological interatomic coupling.
+
+Dimensionless; not a microscopic electromagnetic interaction law. A bond&#x27;s
+reference midpoint defines its fixed actuation weight. External work is
+tracked explicitly; the field source is an idealized actuator, not storage.
+&quot;&quot;&quot;
+from dataclasses import dataclass
+import numpy as np
+from .core import Parameters, forces_and_potential
+from .impact import ImpactConfig, build, energy_partition
+
+@dataclass(frozen=True)
+class CouplingConfig:
+    stiffness: float = 8.0
+    center_x: float = 0.0
+    width: float = 2.0
+    ramp_start: float = 0.0
+    ramp_duration: float = 0.5
+    active_until: float = 20.0
+
+
+def envelope(t, cfg):
+    &quot;&quot;&quot;Smooth C1 on/off envelope and its analytic time derivative.&quot;&quot;&quot;
+    if cfg.ramp_duration &lt;= 0 or cfg.active_until &lt; cfg.ramp_start + cfg.ramp_duration:
+        raise ValueError(&#x27;Invalid ramp timing&#x27;)
+    def smooth(z):
+        if z &lt;= 0: return 0., 0.
+        if z &gt;= 1: return 1., 0.
+        return z*z*(3-2*z), 6*z*(1-z)
+    a, da = smooth((t-cfg.ramp_start)/cfg.ramp_duration)
+    b, db = smooth((cfg.active_until-t)/cfg.ramp_duration)
+    return a*b, (da*b-a*db)/cfg.ramp_duration
+
+
+def reference_weights(reference, bonds, cfg):
+    if cfg.width &lt;= 0 or cfg.stiffness &lt; 0: raise ValueError(&#x27;Invalid coupling parameters&#x27;)
+    mids = (reference[bonds[:,0],0]+reference[bonds[:,1],0])/2
+    return np.exp(-0.5*((mids-cfg.center_x)/cfg.width)**2)
+
+
+def coupling_terms(state, reference, cfg):
+    a,b=state.bonds.T
+    d=state.positions[b]-state.positions[a]
+    r=np.linalg.norm(d,axis=1)
+    if np.any(r &lt; 1e-12): raise ValueError(&#x27;Coincident bonded particles&#x27;)
+    r0=np.linalg.norm(reference[b]-reference[a],axis=1)
+    w=reference_weights(reference,state.bonds,cfg)
+    amplitude, derivative=envelope(state.time,cfg)
+    delta=r-r0
+    k=cfg.stiffness*w*amplitude
+    pair=(k*delta/r)[:,None]*d
+    f=np.zeros_like(state.positions)
+    np.add.at(f,a,pair)
+    np.add.at(f,b,-pair)
+    u=0.5*np.dot(k,delta**2)
+    power=0.5*cfg.stiffness*derivative*np.dot(w,delta**2)
+    return f,float(u),float(power)
+
+
+def combined_forces(state, reference, cfg, params):
+    f,u=forces_and_potential(state,params)
+    fc,uc,power=coupling_terms(state,reference,cfg)
+    return f+fc,u+uc,power,uc
+
+
+def coupled_step(state, reference, dt, cfg, params):
+    &quot;&quot;&quot;Nonautonomous velocity-Verlet; trapezoidal quadrature of dU/dt.&quot;&quot;&quot;
+    if dt &lt;= 0: raise ValueError(&#x27;dt must be positive&#x27;)
+    f0,_,p0,_=combined_forces(state,reference,cfg,params)
+    a0=f0/state.masses[:,None]
+    state.positions += dt*state.velocities + 0.5*dt**2*a0
+    state.time += dt
+    f1,_,p1,_=combined_forces(state,reference,cfg,params)
+    state.velocities += 0.5*dt*(a0+f1/state.masses[:,None])
+    return 0.5*dt*(p0+p1)
+
+
+def run_coupled(impact=ImpactConfig(), coupling=CouplingConfig(), params=Parameters()):
+    if impact.duration&lt;=0 or impact.dt&lt;=0 or impact.sample_every&lt;1: raise ValueError(&#x27;Invalid integration settings&#x27;)
+    state=build(impact,params)
+    ref=state.positions.copy()
+    initial=energy_partition(state,params)
+    e0=initial[&#x27;total_energy&#x27;]
+    p0=np.array([initial[&#x27;momentum_x&#x27;],initial[&#x27;momentum_y&#x27;]])
+    work=0.
+    records=[]
+    def sample():
+        _,u,power,uc=combined_forces(state,ref,coupling,params)
+        k=0.5*np.sum(state.masses[:,None]*state.velocities**2)
+        momentum=np.sum(state.masses[:,None]*state.velocities,axis=0)
+        total=k+u
+        return {&#x27;time&#x27;:float(state.time),&#x27;projectile_x&#x27;:float(state.positions[-1,0]),
+                &#x27;projectile_vx&#x27;:float(state.velocities[-1,0]),
+                &#x27;projectile_kinetic&#x27;:float(0.5*state.masses[-1]*np.dot(state.velocities[-1],state.velocities[-1])),
+                &#x27;lattice_kinetic&#x27;:float(k-0.5*state.masses[-1]*np.dot(state.velocities[-1],state.velocities[-1])),
+                &#x27;coupling_potential&#x27;:uc,&#x27;total_energy&#x27;:float(total),
+                &#x27;actuator_work&#x27;:float(work),&#x27;actuator_power&#x27;:power,
+                &#x27;energy_residual&#x27;:float(total-e0-work),
+                &#x27;momentum_x&#x27;:float(momentum[0]),&#x27;momentum_y&#x27;:float(momentum[1])}
+    records.append(sample())
+    n=int(round(impact.duration/impact.dt))
+    for i in range(1,n+1):
+        work+=coupled_step(state,ref,impact.dt,coupling,params)
+        if i%impact.sample_every==0 or i==n: records.append(sample())
+    residual=max(abs(r[&#x27;energy_residual&#x27;]) for r in records)
+    momentum=max(np.linalg.norm(np.array([r[&#x27;momentum_x&#x27;],r[&#x27;momentum_y&#x27;]])-p0) for r in records)
+    summary={&#x27;initial_projectile_kinetic&#x27;:initial[&#x27;projectile_kinetic&#x27;],
+             &#x27;final_projectile_kinetic&#x27;:records[-1][&#x27;projectile_kinetic&#x27;],
+             &#x27;net_actuator_work&#x27;:float(work),&#x27;final_coupling_potential&#x27;:records[-1][&#x27;coupling_potential&#x27;],
+             &#x27;max_abs_energy_balance_residual&#x27;:float(residual),
+             &#x27;max_momentum_error&#x27;:float(momentum),
+             &#x27;final_projectile_x&#x27;:float(state.positions[-1,0]),
+             &#x27;final_projectile_vx&#x27;:float(state.velocities[-1,0]),
+             &#x27;duration&#x27;:float(state.time)}
+    return records,summary,state
+</pre></main></html>

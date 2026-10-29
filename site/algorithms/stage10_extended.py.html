@@ -1,0 +1,42 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>INTERSPACE / SOURCE</title><link rel="stylesheet" href="../style.css"><main><p><a href="../index.html#algorithms">← WORKSTATION / ALGORITHMS</a></p><h1>stage10_extended.py</h1><p>Exact source from the Stage 12 research archive. Code is provided for inspection, not executed in-browser.</p><pre class="sourcecode">&quot;&quot;&quot;Stage 10 completion candidate: storage ledger and radial wave arrival diagnostics.
+
+Uses the Stage 10 reduced-order model. Electrical storage is an idealized
+post-load converter; it does NOT feed back into transducer voltage. It cannot
+be interpreted as a validated rectifier or battery model.
+&quot;&quot;&quot;
+from dataclasses import dataclass, replace
+import numpy as np
+from .transport3d import TransportConfig, run as run_transport
+from .hemisphere import mesh
+
+@dataclass(frozen=True)
+class StorageConfig:
+    efficiency: float = 0.75
+    capacity_J: float = 1e-4
+    initial_J: float = 0.0
+    wave_threshold_fraction: float = 1e-5
+
+def run(cfg=TransportConfig(), storage=StorageConfig(), sample_every=10):
+    if not 0 &lt;= storage.efficiency &lt;= 1 or storage.capacity_J &lt; 0 or not 0 &lt;= storage.initial_J &lt;= storage.capacity_J:
+        raise ValueError(&#x27;Invalid storage parameters&#x27;)
+    if storage.wave_threshold_fraction &lt;= 0:
+        raise ValueError(&#x27;Wave threshold must be positive&#x27;)
+    base=run_transport(cfg,sample_every)
+    h=base[&#x27;history&#x27;]; cols=base[&#x27;columns&#x27;]
+    load=h[:,cols.index(&#x27;resistor_energy_J&#x27;)]
+    generated=np.maximum(load-load[0],0)
+    potential=storage.efficiency*generated
+    captured=np.minimum(potential,storage.capacity_J-storage.initial_J)
+    stored=storage.initial_J+captured
+    converter_heat=(1-storage.efficiency)*generated
+    overflow=np.maximum(potential-captured,0)
+    # Existing resistor ledger reinterpreted as downstream electrical delivery:
+    # storage + conversion loss + overflow = electrical output from the load.
+    new=np.column_stack([h,stored,converter_heat,overflow])
+    new_cols=cols+[&#x27;stored_electrical_J&#x27;,&#x27;conversion_heat_J&#x27;,&#x27;storage_overflow_J&#x27;]
+    audit=generated-(captured+converter_heat+overflow)
+    return {**base,&#x27;history&#x27;:new,&#x27;columns&#x27;:new_cols,&#x27;stored_energy_J&#x27;:float(stored[-1]),
+            &#x27;converter_heat_J&#x27;:float(converter_heat[-1]),&#x27;overflow_J&#x27;:float(overflow[-1]),
+            &#x27;storage_partition_residual_J&#x27;:float(np.max(np.abs(audit))),
+            &#x27;storage_note&#x27;:&#x27;Ideal downstream accounting only; no converter feedback, rectifier dynamics, or real battery model.&#x27;}
+</pre></main></html>

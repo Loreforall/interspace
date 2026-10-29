@@ -1,0 +1,29 @@
+# INTERSPACE — Stage 10/11 physics-and-validation pass
+
+## Added in this pass
+
+- `interspace/final_validation.py`: vector-valued 3D sphere-to-node penalty contact (including oblique impact), reciprocal piezoelectric support coupling, idealized load-conductance feedback with finite storage, conversion and thermal ledgers.
+- Prescribed deployment time scan with actuator force and positive-power limit checks.
+- Flat and dome discrete network comparisons with matched node counts, edge topology, and total free-node mass at each mesh resolution.
+- Two angular resolutions and two timesteps, reproducible CSV outputs.
+- Six additional tests; 64 tests passed at the time of packaging.
+
+Run: `python -m examples.run_final_validation` and `python -m pytest -q`.
+
+## Results and interpretation
+
+16 baseline comparisons, max absolute numerical energy residual 2.09e-4 J, maximum stored energy 1.06e-6 J in the scanned examples. No tested prescribed deployment time met both the 250 W and 1000 N illustrative limits. See `results/final_validation/`.
+
+## Critical open items — NOT completed or validated
+
+1. Contact is **3D vector-valued but node-based**, not triangle-facet continuous surface contact. It cannot establish reliable penetration or peak contact stress.
+2. The storage circuit uses a **phenomenological conductance that falls with storage state**, feeding back into voltage and force; it is not a physically validated rectifier, converter or battery model.
+3. The prescribed deployment trajectory is **not a forward-simulated motor or linkage mechanism**. The power/force scan only identifies feasibility of this idealized motion under specified limits.
+4. Two meshes and two timesteps are **sensitivity checks, not demonstrated convergence**. Angular edge stiffness and contact discretization need consistent refinement laws.
+5. The flat and dome discrete networks have equal node count, edge topology and free-node mass, but not equal projected geometry or effective mechanical properties. These are preliminary comparisons, not fully fair engineering benchmarks.
+6. Material properties are illustrative; there is no experimental calibration, full continuum shell constitutive law, buckling, thermal coupling, or manufacturing assessment.
+7. The original interatomic-gap/free-standing energy barrier hypothesis is **not physically demonstrated** by this project.
+
+## Decision
+
+Do not claim Stage 11 is complete. Before Stage 12, implement facet contact, calibrated coupled circuits, a feasible deployable mechanism, systematic convergence and comparable physical baselines, or explicitly close the research with these as documented limitations.

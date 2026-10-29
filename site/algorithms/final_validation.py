@@ -1,0 +1,104 @@
+"""Stage 10/11 validation prototypes: 3D sphere-node contact and reciprocal loaded harvesters.
+
+A discrete network model, NOT continuous surface contact, material calibration, or
+proof of a free-standing field. A capacitor-load conductance decreases as its
+idealized store fills; this is a phenomenological electrical interface.
+"""
+from dataclasses import dataclass, replace
+import numpy as np
+from .hemisphere import DomeConfig, mesh, internal
+from .deployment import DeploymentConfig, simulate as deployment
+
+@dataclass(frozen=True)
+class CoupledConfig:
+    dome: DomeConfig = DomeConfig(duration=.012, dt=1e-5)
+    impact_phi: float = .35
+    impact_theta: float = .4
+    gap_m: float = .0005
+    capacitance_F: float = 2e-6
+    coupling_N_per_V: float = .004
+    resistance_ohm: float = 400.
+    storage_capacity_J: float = .0001
+    conversion_efficiency: float = .75
+    support_damping: float = .3
+    sample_every: int = 10
+    geometry: str = "dome"
+
+def run(cfg=CoupledConfig()):
+    d=cfg.dome
+    if min(d.dt,d.duration,d.node_mass,d.projectile_mass,d.projectile_radius,cfg.capacitance_F,cfg.resistance_ohm)>0 and cfg.storage_capacity_J>=0 and 0<=cfg.conversion_efficiency<=1 and cfg.support_damping>=0 and cfg.sample_every>=1 and 0<=cfg.impact_phi<np.pi/2:
+        pass
+    else: raise ValueError('Invalid configuration')
+    p0, edges, rest, fixed=mesh(d)
+    if cfg.geometry not in ("dome", "flat"):
+        raise ValueError("Invalid geometry")
+    if cfg.geometry == "flat":
+        p0[:,2]=0.
+        rest=np.linalg.norm(p0[edges[:,1]]-p0[edges[:,0]],axis=1)
+    p=p0.copy();v=np.zeros_like(p)
+    target=np.array([d.radius*np.sin(cfg.impact_phi)*np.cos(cfg.impact_theta),d.radius*np.sin(cfg.impact_phi)*np.sin(cfg.impact_theta),d.radius*np.cos(cfg.impact_phi)])
+    free=np.where(~fixed)[0];hit=int(free[np.argmin(np.linalg.norm(p0[free]-target,axis=1))])
+    # Projectile center starts along the outward surface normal, moves inward.
+    normal=(np.array([0.,0.,1.]) if cfg.geometry=="flat" else p0[hit]/np.linalg.norm(p0[hit]));center=p0[hit]+normal*(d.projectile_radius+cfg.gap_m);velocity=-normal*d.impact_speed
+    mask=fixed[edges[:,0]]^fixed[edges[:,1]];se=edges[mask]
+    mobile=np.where(fixed[se[:,0]],se[:,1],se[:,0]);anchor=np.where(fixed[se[:,0]],se[:,0],se[:,1]);V=np.zeros(len(mobile))
+    stored=heat=converter_heat=overflow=load=0.; initial=.5*d.projectile_mass*np.dot(velocity,velocity)
+    records=[]; steps=round(d.duration/d.dt)
+    for n in range(steps+1):
+        force,elastic,bulk_rate=internal(p,v,edges,rest,d.stiffness,d.damping)
+        sep=p[mobile]-p[anchor];lens=np.maximum(np.linalg.norm(sep,axis=1),1e-12);directions=sep/lens[:,None]
+        speed=np.einsum('ij,ij->i',v[mobile],directions)
+        np.add.at(force,mobile,-cfg.coupling_N_per_V*V[:,None]*directions-cfg.support_damping*speed[:,None]*directions)
+        # Node-sphere penalty contact in all three dimensions, with damping only on approach.
+        diff=center[None,:]-p[free];dist=np.maximum(np.linalg.norm(diff,axis=1),1e-12)
+        normals=diff/dist[:,None];overlap=np.maximum(0,d.projectile_radius-dist)
+        relative=np.einsum('ij,ij->i',velocity[None,:]-v[free],normals)
+        approach=np.maximum(0,-relative)
+        magnitudes=np.where(overlap>0,d.contact_stiffness*overlap+d.contact_damping*approach,0.)
+        cforce=np.sum(magnitudes[:,None]*normals,axis=0)
+        np.add.at(force,free,-magnitudes[:,None]*normals)
+        contact_energy=.5*d.contact_stiffness*np.dot(overlap,overlap)
+        contact_heat_rate=d.contact_damping*np.sum((approach**2)*(overlap>0))
+        support_heat_rate=cfg.support_damping*np.dot(speed,speed)
+        electric=.5*cfg.capacitance_F*np.dot(V,V)
+        total=.5*d.node_mass*np.sum(v[free]**2)+.5*d.projectile_mass*np.dot(velocity,velocity)+elastic+contact_energy+electric+stored+heat+converter_heat+overflow
+        if n%cfg.sample_every==0 or n==steps:
+            records.append([n*d.dt,*center,*velocity,stored,heat,converter_heat,overflow,electric,total-initial,np.max(overlap),np.linalg.norm(cforce)])
+        if n==steps:break
+        # Storage saturation changes the circuit's effective load, feeding back on V and force.
+        fill=stored/cfg.storage_capacity_J if cfg.storage_capacity_J>0 else 1.
+        conductance=(1-min(fill,1.))/cfg.resistance_ohm
+        dissipated=d.dt*conductance*np.dot(V,V)
+        accepted=min(cfg.conversion_efficiency*dissipated,max(0.,cfg.storage_capacity_J-stored))
+        stored+=accepted;converter_heat+=(1-cfg.conversion_efficiency)*dissipated
+        overflow+=cfg.conversion_efficiency*dissipated-accepted
+        heat+=d.dt*(bulk_rate+contact_heat_rate+support_heat_rate)
+        V+=d.dt*(cfg.coupling_N_per_V*speed-conductance*V)/cfg.capacitance_F
+        v[free]+=d.dt*force[free]/d.node_mass;p[free]+=d.dt*v[free]
+        velocity+=d.dt*cforce/d.projectile_mass;center+=d.dt*velocity
+    a=np.asarray(records)
+    return dict(history=a,columns=['time_s','x_m','y_m','z_m','vx_m_s','vy_m_s','vz_m_s','stored_J','heat_J','converter_heat_J','overflow_J','capacitor_J','energy_residual_J','max_overlap_m','contact_force_N'],
+        max_abs_energy_residual_J=float(np.max(np.abs(a[:,12]))),initial_impact_energy_J=initial,stored_J=stored,final_projectile_speed_m_s=float(np.linalg.norm(velocity)),impact_node=hit,number_of_contact_nodes_max='not tracked',
+        model_limitations='Discrete node-sphere contact, no surface facets or friction; idealized storage conductance; no material calibration.')
+
+def deployment_scan(base=DeploymentConfig(), times=(.08,.16,.32,.64)):
+    rows=[]
+    for duration in times:
+        cfg=replace(base,activation_time_s=duration,duration_s=duration,dt_s=min(base.dt_s,duration/400))
+        out=deployment(cfg)
+        rows.append(dict(activation_time_s=duration,power_W=out['max_positive_power_W'],force_N=out['max_sum_force_N'],positive_work_J=float(out['history'][-1,5]),within_limits=bool(out['power_limit_pass'] and out['force_limit_pass'])))
+    return rows
+
+def matched_study(base=CoupledConfig(), sectors=(12,24),dt_factors=(1.,.5), geometries=('dome','flat'), couplings=(0.,.004)):
+    rows=[]
+    for geometry in geometries:
+        for sec in sectors:
+            for factor in dt_factors:
+                for coupling in couplings:
+                    # Preserve total free-node mass as angular resolution changes.
+                    total_mass=base.dome.node_mass*(1+(base.dome.rings-1)*base.dome.sectors)
+                    free_nodes=1+(base.dome.rings-1)*sec
+                    d=replace(base.dome,sectors=sec,node_mass=total_mass/free_nodes,dt=base.dome.dt*factor)
+                    result=run(replace(base,dome=d,coupling_N_per_V=coupling,geometry=geometry))
+                    rows.append(dict(geometry=geometry,sectors=sec,dt_s=d.dt,coupling=coupling,status='simulated',stored_J=result['stored_J'],final_speed_m_s=result['final_projectile_speed_m_s'],energy_residual_J=result['max_abs_energy_residual_J']))
+    return rows

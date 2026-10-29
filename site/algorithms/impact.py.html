@@ -1,0 +1,122 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>INTERSPACE / SOURCE</title><link rel="stylesheet" href="../style.css"><main><p><a href="../index.html#algorithms">← WORKSTATION / ALGORITHMS</a></p><h1>impact.py</h1><p>Exact source from the Stage 12 research archive. Code is provided for inspection, not executed in-browser.</p><pre class="sourcecode">&quot;&quot;&quot;Stage 2 passive impact mechanics; dimensionless and conservative.
+
+Damage is *diagnostic only*: bond extension beyond a threshold is flagged,
+not broken. No unsupported thermal or recoverable-energy claims.
+&quot;&quot;&quot;
+from dataclasses import dataclass
+import numpy as np
+from .core import Parameters, make_lattice, forces_and_potential, step
+
+@dataclass(frozen=True)
+class ImpactConfig:
+    nx: int = 8
+    ny: int = 7
+    spacing: float = 1.0
+    speed: float = 1.0
+    projectile_x: float = -1.5
+    offset_y: float = 0.0
+    duration: float = 4.0
+    dt: float = 0.001
+    sample_every: int = 10
+    strain_threshold: float = 0.15
+    defect_fraction: float = 0.0
+    seed: int = 0
+
+
+def build(config=ImpactConfig(), params=Parameters()):
+    if not (0 &lt;= config.defect_fraction &lt; 1):
+        raise ValueError(&#x27;defect_fraction must be in [0,1)&#x27;)
+    if config.strain_threshold &lt;= 0:
+        raise ValueError(&#x27;strain_threshold must be positive&#x27;)
+    state = make_lattice(config.nx, config.ny, config.spacing, config.speed,
+                         config.projectile_x,
+                         (config.ny-1)*config.spacing/2+config.offset_y, params)
+    if config.defect_fraction:
+        rng = np.random.default_rng(config.seed)
+        nremove = int(round(len(state.bonds)*config.defect_fraction))
+        if nremove:
+            retained = rng.choice(len(state.bonds), len(state.bonds)-nremove, replace=False)
+            state.bonds = state.bonds[np.sort(retained)]
+    return state
+
+
+def bond_metrics(state, reference_positions, strain_threshold=0.15):
+    a,b = state.bonds.T
+    ref = np.linalg.norm(reference_positions[b]-reference_positions[a],axis=1)
+    cur = np.linalg.norm(state.positions[b]-state.positions[a],axis=1)
+    strain = (cur-ref)/ref
+    return {&#x27;max_tensile_strain&#x27;:float(np.max(strain)),
+            &#x27;max_absolute_strain&#x27;:float(np.max(np.abs(strain))),
+            &#x27;bonds_over_threshold&#x27;:int(np.count_nonzero(strain &gt; strain_threshold)),
+            &#x27;bond_count&#x27;:len(strain)}
+
+
+def energy_partition(state, params=Parameters()):
+    _, potential = forces_and_potential(state, params)
+    k = 0.5*state.masses*np.sum(state.velocities**2,axis=1)
+    return {&#x27;projectile_kinetic&#x27;:float(k[-1]),
+            &#x27;lattice_kinetic&#x27;:float(np.sum(k[:-1])),
+            &#x27;potential&#x27;:float(potential),
+            &#x27;total_energy&#x27;:float(np.sum(k)+potential),
+            &#x27;momentum_x&#x27;:float(np.dot(state.masses,state.velocities[:,0])),
+            &#x27;momentum_y&#x27;:float(np.dot(state.masses,state.velocities[:,1]))}
+
+
+def run_impact(config=ImpactConfig(), params=Parameters()):
+    if config.duration &lt;= 0 or config.dt &lt;= 0 or config.sample_every &lt; 1:
+        raise ValueError(&#x27;Invalid integration settings&#x27;)
+    state=build(config,params)
+    reference=state.positions.copy()
+    initial=energy_partition(state,params)
+    nsteps=int(round(config.duration/config.dt))
+    if nsteps &lt; 1: raise ValueError(&#x27;No integration steps&#x27;)
+    records=[]
+    peak_contact=0.0
+    peak_displacement=0.0
+    max_strain=0.0
+    ever_over_threshold=np.zeros(len(state.bonds),dtype=bool)
+    min_projectile_x=float(state.positions[-1,0])
+    max_projectile_x=min_projectile_x
+    def sample():
+        en=energy_partition(state,params)
+        bond=bond_metrics(state,reference,config.strain_threshold)
+        displacement=np.linalg.norm(state.positions[:-1]-reference[:-1],axis=1)
+        return {&#x27;time&#x27;:float(state.time), &#x27;projectile_x&#x27;:float(state.positions[-1,0]),
+                &#x27;projectile_vx&#x27;:float(state.velocities[-1,0]),
+                &#x27;max_lattice_displacement&#x27;:float(displacement.max()),**en,**bond}
+    records.append(sample())
+    for i in range(1,nsteps+1):
+        step(state,config.dt,params)
+        sep=np.linalg.norm(state.positions[:-1]-state.positions[-1],axis=1)
+        peak_contact=max(peak_contact,float(np.max(params.contact_stiffness*np.maximum(params.contact_radius-sep,0))))
+        dis=np.linalg.norm(state.positions[:-1]-reference[:-1],axis=1)
+        peak_displacement=max(peak_displacement,float(dis.max()))
+        a,b=state.bonds.T
+        r0=np.linalg.norm(reference[b]-reference[a],axis=1)
+        strain=(np.linalg.norm(state.positions[b]-state.positions[a],axis=1)-r0)/r0
+        max_strain=max(max_strain,float(np.max(strain)))
+        ever_over_threshold |= strain&gt;config.strain_threshold
+        min_projectile_x=min(min_projectile_x,float(state.positions[-1,0]))
+        max_projectile_x=max(max_projectile_x,float(state.positions[-1,0]))
+        if i%config.sample_every==0 or i==nsteps: records.append(sample())
+    final=energy_partition(state,params)
+    e0=initial[&#x27;total_energy&#x27;]
+    errors=np.array([r[&#x27;total_energy&#x27;]-e0 for r in records])
+    mom=np.array([[r[&#x27;momentum_x&#x27;]-initial[&#x27;momentum_x&#x27;],r[&#x27;momentum_y&#x27;]-initial[&#x27;momentum_y&#x27;]] for r in records])
+    # Translational kinetic energy transfer is not dissipation or harvesting.
+    summary={&#x27;initial_projectile_kinetic&#x27;:initial[&#x27;projectile_kinetic&#x27;],
+             &#x27;final_projectile_kinetic&#x27;:final[&#x27;projectile_kinetic&#x27;],
+             &#x27;final_lattice_kinetic&#x27;:final[&#x27;lattice_kinetic&#x27;],
+             &#x27;projectile_kinetic_change&#x27;:final[&#x27;projectile_kinetic&#x27;]-initial[&#x27;projectile_kinetic&#x27;],
+             &#x27;peak_pair_contact_force&#x27;:peak_contact,
+             &#x27;peak_lattice_displacement&#x27;:peak_displacement,
+             &#x27;peak_tensile_strain&#x27;:max_strain,
+             &#x27;unique_bonds_exceeding_strain_threshold&#x27;:int(ever_over_threshold.sum()),
+             &#x27;min_projectile_x&#x27;:min_projectile_x,
+             &#x27;max_projectile_x&#x27;:max_projectile_x,
+             &#x27;max_abs_energy_error&#x27;:float(np.max(np.abs(errors))),
+             &#x27;max_momentum_error&#x27;:float(np.max(np.linalg.norm(mom,axis=1))),
+             &#x27;total_bonds&#x27;:len(state.bonds),
+             &#x27;end_time&#x27;:state.time}
+    return records,summary,state
+</pre></main></html>

@@ -1,0 +1,130 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>INTERSPACE / RESEARCH REPORT</title><link rel="stylesheet" href="../../style.css"><main><p><a href="../../index.html#research">← WORKSTATION</a></p><h1>README</h1><pre class="sourcecode"># INTERSPACE — Stage 1
+
+Research prototype for **classical, dimensionless, two-dimensional lattice impact mechanics**. This is **not** a validated force-field or atomic-gap energy storage mechanism.
+
+## Roadmap and stage acceptance gates
+
+| Stage | Scope | Deliverable / gate |
+|---|---|---|
+| 1 — Baseline | Nearest-neighbor Morse lattice; conservative projectile contact; velocity-Verlet; energy and momentum audits | Runnable collision, force-gradient tests, conservation and timestep-refinement tests |
+| 2 — Material response | Defects, supports, fracture, strain/stress, waves | Verified elastic and failure responses; boundary work accounted for |
+| 3 — Active coupling | Controlled interatomic effective potentials, external work | Explicit actuator energy bookkeeping and passive comparison |
+| 4 — Physical field | Calibrated EM/electromechanical constitutive coupling | Field strength and response feasibility constraints |
+| 5 — Recovery | Transducers, storage, heat and inefficiency | Energy capture budget with no unaccounted sources |
+| 6 — Control | Adaptive policies, constrained MPC and baselines | Held-out impact performance versus fixed/passive |
+| 7 — Multiphysics | Thermal and multiscale solvers, calibrated materials | Numerical convergence and physical calibration |
+| 8 — Research | Ablations, sweeps, uncertainty, Pareto optimization | Reproducible performance and sensitivity reports |
+| 9 — Release | API, examples, benchmarks, documentation | Agency-ready reusable engineering package |
+
+## Installation and execution
+
+```bash
+python -m pip install -e &#x27;.[test,plots]&#x27;
+pytest -q
+python -m examples.run_baseline --output results
+```
+
+Outputs: `diagnostics.csv`, `final_state.npz`, `summary.json`, and (if matplotlib is installed) `diagnostics.png`.
+
+## Model definition
+
+- Atoms are point masses on a square grid; each initial nearest-neighbor bond follows the shifted Morse potential `D*(1-exp(-a*(r-r0)))**2-D`.
+- A projectile is another point mass. It interacts with atoms through the repulsive contact potential `0.5*k*max(R-r,0)**2`.
+- Force is the negative spatial gradient of the total potential.
+- The integrator is velocity-Verlet; no thermostat, damping, supports, field, or energy recovery is included.
+- The complete freely moving system should conserve total momentum and approximately conserve total energy (bounded integration error).
+- Bond connectivity is fixed. No chemical bond breaking, quantum effects, electronic degrees of freedom, real materials calibration, or continuum stress tensor is implemented.
+- All parameters and outputs are dimensionless. The default equilibrium lattice has negative binding potential; relative drift is normalized by `max(abs(E_initial),1)` to avoid division by zero.
+- The projectile contact is an *assumed phenomenological interaction*, not a prediction of arbitrary-matter repulsion by an electromagnetic field.
+
+## Stage 1 verification
+
+`tests/test_core.py` checks initial equilibrium forces, finite-difference force gradients, conservation of total energy and momentum, and trajectory convergence under timestep refinement. These are necessary checks, **not sufficient** for validation against physical experiments.
+
+## Next-stage risks
+
+The 2D lattice does not reproduce a 3D material, and Morse nearest-neighbor bonds omit many-body physics. Boundary support work and heat will matter once the model is extended. Adaptive stiffness changes can inject or extract work, so Stage 3 must integrate the explicit time derivative of the coupling potential in the energy budget. A decrease in projectile kinetic energy alone is not proof of recovered energy.
+
+## Stage 2 — Passive impact mechanics (2026-10-25)
+
+Added `interspace.impact` and `examples.run_impact`. This stage introduces reproducible seeded removal of lattice bonds (a *topological defect*, not a missing atom), bond strain diagnostics, per-step peak contact force, maximum displacement, energy partition, and projectile position/velocity histories. Bond threshold crossings are **diagnostic only**; bonds are never removed dynamically and no irreversible fracture, thermal loss, or harvesting is modeled.
+
+Run:
+
+```bash
+python -m pip install -e &#x27;.[test,plots]&#x27;
+pytest -q
+python -m examples.run_impact --output results/stage2
+python -m examples.run_impact --output results/defective --defect-fraction 0.15 --seed 42
+```
+
+The impact model is dimensionless. `peak_pair_contact_force` is the maximum **individual projectile–atom contact force magnitude**, not the net impact force. Energy partition separates projectile and lattice kinetic energies; lattice kinetic gain does not imply absorbed or stored energy. The lattice is free (no fixed supports), so total momentum should remain conserved. The final projectile kinetic energy can include transverse motion and rebound. `max_abs_energy_error` is measured on saved samples, not every internal timestep. The optional plotting dependency is matplotlib.
+
+Stage 2 is a working increment, **not yet complete**: missing atom/vacancy defects, stress virials, wave-speed measurement, fracture dynamics, trajectory convergence and broad parameter sweeps remain. The next increment should implement them before starting active field coupling.
+
+## Stage 3 — Prescribed interatomic coupling
+
+Run `python -m examples.run_coupling --output results/stage3` and `pytest -q`.
+
+This stage adds a **phenomenological** time-varying pairwise harmonic interaction on top of the passive Morse lattice. Fixed reference-midpoint weights represent an externally actuated region. The actuator&#x27;s instantaneous work is integrated from the explicit time derivative of the potential, and `energy_residual = E(t)-E(0)-W_actuator`. Negative net actuator work means energy was returned to the idealized source, **not** harvested or stored. The pair forces obey Newton&#x27;s third law. All units are dimensionless; no physical microscopic coupling law, field dynamics, or energy-recovery hardware is claimed.
+
+Outputs include passive and coupled history CSVs, final state NPZs, a comparison JSON, and a diagnostic plot if matplotlib is installed. Comparison is exploratory, not proof of improved stopping or real-world feasibility. Next steps: richer benchmarks and bounded physical actuation models, then storage and optimization.
+
+## Stage 4 — Physical field feasibility (SI-unit reference model)
+
+`python -m examples.run_field --output results/stage4`
+
+The new `interspace.field` module provides an **independent SI-unit benchmark** for
+an induced-dipole particle in a prescribed spatial Gaussian electric field.
+It does **not** couple to the dimensionless Morse lattice or solve Maxwell&#x27;s
+equations. This deliberate separation prevents mixing arbitrary lattice units
+with SI electric-field strengths. The interaction is
+`U(x,t)=-alpha E(x,t)^2/2`, with analytic force and external-source power.
+
+Limitations: static isotropic linear polarizability; nonretarded/quasistatic;
+no saturation, breakdown, ionization, radiation reaction, thermal noise,
+field-source backreaction, substrate, macroscopic neutral-object stopping,
+or recovered electrical energy. Positive polarizability makes a **potential
+well, not a repulsive barrier**. The prescribed field&#x27;s external power is
+tracked at the particle interaction level, but the electrical supply and
+stored field energy are not included in a closed system budget. The computed
+field pressure is a scale estimate, not a force on arbitrary matter.
+
+Next steps: calibrate a particular material/geometry and actuator; build a
+self-consistent electromechanical coupling and account for the field source.
+
+## Stage 5: interatomic energy recovery (phenomenological)
+
+Run `python -m examples.run_recovery --output results/stage5`.
+The model applies equal-and-opposite radial dashpots between bonded atoms, exactly
+measures mechanical energy removed by each dissipative kick, and partitions that
+energy between a capped reservoir and thermal loss. It does not model a physical
+transducer, free-space barrier, microscopic field or feedback controller. Units
+are dimensionless. Reservoir saturation currently changes energy allocation,
+not damping force. Compare projectile kinetic energy at fixed time cautiously:
+it does not alone measure permanent stopping, penetration or rebound.
+
+## Stage 6 — Feedback harvesting (dimensionless)
+
+Run `python -m examples.run_adaptive --output results/stage6` and `pytest -q`.
+
+The new `interspace.adaptive` module implements a bounded feedback controller based on measured relative bond velocities, with finite response time and slew rate. The passive, fixed, and adaptive runs use identical projectile and lattice initial conditions. Storage saturation reduces the effective dashpot load, so reservoir capacity changes the mechanical response. Energy removed by the dashpot is measured using the kinetic-energy difference and split between recovered energy and heat; momentum-conserving central forces act on lattice bonds.
+
+**Limitations:** The damping is phenomenological and dimensionless; it is not an electromagnetic actuator or an experimentally validated energy harvester. The controller is heuristic, not a model-predictive optimizer. No electrical circuit or field energy is modeled. The present comparison does not establish stopping, absence of rebound, or optimality; its final-time energy metrics must be interpreted alongside trajectory and storage energy. This model also has no actuator power or sensing energy charge because the commanded damping is treated as a passive adjustable load. A physically grounded model must add these costs.
+
+## Stage 7 — SI-unit electromechanical reference
+
+Run `python -m examples.run_physical` to generate the comparison data. `interspace.physical` models a *single effective structural compression mode* with a linear piezoelectric transducer and resistive electrical load. It is intentionally separate from the dimensionless lattice: **no atomistic-to-continuum coupling or validated interatomic field mechanism is claimed**.
+
+Governing equations (x in m, v in m/s, V in volts):
+
+- `m dv/dt = -k x - c v - theta V`
+- `C dV/dt = theta v - V/R`
+- `dE_load/dt = V²/R`
+- `dQ_internal/dt = c v² - G*(Q_internal/C_heat)`
+- `dQ_released/dt = G*(Q_internal/C_heat)`
+
+The closed-system ledger `0.5*m*v² + 0.5*k*x² + 0.5*C*V² + E_load + Q_internal + Q_released` is conserved up to integration error. The structure is represented by a single effective mode; negative x is allowed and **is not physical projectile penetration**. The mechanical impact is represented by initial modal velocity, not resolved contact dynamics. Parameters are illustrative and not calibrated to a particular piezoelectric material or device. The load energy is dissipated electrically in a resistor, **not stored in a battery**. The model does not establish free-space matter arrest, field-induced interatomic bonds, or harvesting of arbitrary projectile kinetic energy.
+
+Next physical upgrades: material-calibrated piezoelectric constitutive coefficients and geometry, rectification and finite storage, unilateral contact and rebound, thermoelasticity, FE/multiscale spatial discretization, published experimental benchmark matching and uncertainty analysis.
+</pre></main></html>

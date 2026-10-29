@@ -1,0 +1,120 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>INTERSPACE / SOURCE</title><link rel="stylesheet" href="../style.css"><main><p><a href="../index.html#algorithms">← WORKSTATION / ALGORITHMS</a></p><h1>core.py</h1><p>Exact source from the Stage 12 research archive. Code is provided for inspection, not executed in-browser.</p><pre class="sourcecode">&quot;&quot;&quot;INTERSPACE Stage 1: dimensionless, planar classical particle mechanics.
+
+Morse pairs are fixed at their initial nearest-neighbour connectivity. The
+projectile uses a finite-range, conservative quadratic contact potential.
+&quot;&quot;&quot;
+from dataclasses import dataclass
+import numpy as np
+
+@dataclass(frozen=True)
+class Parameters:
+    bond_energy: float = 1.0
+    bond_width: float = 3.0
+    equilibrium_distance: float = 1.0
+    contact_stiffness: float = 120.0
+    contact_radius: float = 0.65
+    mass: float = 1.0
+    projectile_mass: float = 4.0
+
+@dataclass
+class State:
+    positions: np.ndarray
+    velocities: np.ndarray
+    masses: np.ndarray
+    bonds: np.ndarray
+    time: float = 0.0
+
+    def copy(self):
+        return State(self.positions.copy(), self.velocities.copy(),
+                     self.masses.copy(), self.bonds.copy(), self.time)
+
+
+def make_lattice(nx=8, ny=7, spacing=1.0, projectile_speed=1.0,
+                 projectile_x=-1.5, projectile_y=None, params=Parameters()):
+    &quot;&quot;&quot;Create square lattice and one projectile (last particle).
+
+    No supports/constraints: the complete system conserves momentum.
+    &quot;&quot;&quot;
+    if nx &lt; 2 or ny &lt; 2 or spacing &lt;= 0:
+        raise ValueError(&#x27;Require nx,ny &gt;= 2 and positive spacing&#x27;)
+    xy = np.array([(i*spacing, j*spacing) for i in range(nx) for j in range(ny)], dtype=float)
+    if projectile_y is None:
+        projectile_y = (ny-1)*spacing/2
+    xy = np.vstack([xy, [projectile_x, projectile_y]])
+    v = np.zeros_like(xy)
+    v[-1, 0] = projectile_speed
+    masses = np.full(len(xy), params.mass)
+    masses[-1] = params.projectile_mass
+    bonds = []
+    for i in range(nx):
+        for j in range(ny):
+            a = i*ny+j
+            if i+1 &lt; nx: bonds.append((a, (i+1)*ny+j))
+            if j+1 &lt; ny: bonds.append((a, i*ny+j+1))
+    return State(xy, v, masses, np.asarray(bonds, dtype=int))
+
+
+def forces_and_potential(state, params=Parameters()):
+    p = state.positions
+    f = np.zeros_like(p)
+    potential = 0.0
+    a, b = state.bonds[:, 0], state.bonds[:, 1]
+    d = p[b] - p[a]
+    r = np.linalg.norm(d, axis=1)
+    if np.any(r &lt; 1e-12): raise ValueError(&#x27;Coincident bonded particles&#x27;)
+    exp_term = np.exp(np.clip(-params.bond_width*(r-params.equilibrium_distance), -60, 60))
+    potential += float(np.sum(params.bond_energy*(1-exp_term)**2 - params.bond_energy))
+    derivative = 2*params.bond_energy*params.bond_width*(1-exp_term)*exp_term
+    pair_f = (derivative/r)[:, None]*d
+    np.add.at(f, a, pair_f)
+    np.add.at(f, b, -pair_f)
+
+    # Last particle is projectile. Contact acts against all lattice particles.
+    d = p[-1] - p[:-1]
+    r = np.linalg.norm(d, axis=1)
+    if np.any(r &lt; 1e-12): raise ValueError(&#x27;Coincident contact particles&#x27;)
+    overlap = np.maximum(params.contact_radius-r, 0.0)
+    potential += float(0.5*params.contact_stiffness*np.dot(overlap, overlap))
+    # F_projectile = k*overlap*(projectile - atom)/r
+    contact_f = (params.contact_stiffness*overlap/r)[:, None]*d
+    f[-1] += contact_f.sum(axis=0)
+    f[:-1] -= contact_f
+    return f, potential
+
+
+def diagnostics(state, params=Parameters()):
+    _, potential = forces_and_potential(state, params)
+    kinetic = 0.5*np.sum(state.masses[:, None]*state.velocities**2)
+    momentum = np.sum(state.masses[:, None]*state.velocities, axis=0)
+    return {&#x27;time&#x27;: float(state.time), &#x27;kinetic&#x27;: float(kinetic),
+            &#x27;potential&#x27;: float(potential), &#x27;total_energy&#x27;: float(kinetic+potential),
+            &#x27;momentum_x&#x27;: float(momentum[0]), &#x27;momentum_y&#x27;: float(momentum[1]),
+            &#x27;projectile_x&#x27;: float(state.positions[-1, 0]),
+            &#x27;projectile_vx&#x27;: float(state.velocities[-1, 0]),
+            &#x27;projectile_kinetic&#x27;: float(0.5*state.masses[-1]*np.dot(state.velocities[-1],state.velocities[-1]))}
+
+
+def step(state, dt, params=Parameters()):
+    &quot;&quot;&quot;Velocity-Verlet for a conservative autonomous Hamiltonian.&quot;&quot;&quot;
+    if dt &lt;= 0: raise ValueError(&#x27;dt must be positive&#x27;)
+    f0, _ = forces_and_potential(state, params)
+    accel0 = f0/state.masses[:, None]
+    state.positions += state.velocities*dt + 0.5*accel0*dt**2
+    f1, _ = forces_and_potential(state, params)
+    state.velocities += 0.5*(accel0+f1/state.masses[:, None])*dt
+    state.time += dt
+    return state
+
+
+def simulate(state, duration=3.0, dt=0.001, sample_every=10, params=Parameters()):
+    &quot;&quot;&quot;Return sampled diagnostics and final state; duration is rounded to steps.&quot;&quot;&quot;
+    if duration &lt;= 0 or sample_every &lt; 1: raise ValueError(&#x27;Invalid duration/sample_every&#x27;)
+    nsteps = int(round(duration/dt))
+    if nsteps &lt; 1: raise ValueError(&#x27;No integration steps&#x27;)
+    records = [diagnostics(state, params)]
+    for k in range(1, nsteps+1):
+        step(state, dt, params)
+        if k % sample_every == 0 or k == nsteps:
+            records.append(diagnostics(state, params))
+    return records, state
+</pre></main></html>

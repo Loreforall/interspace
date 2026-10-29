@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>INTERSPACE / RESEARCH REPORT</title><link rel="stylesheet" href="../../style.css"><main><p><a href="../../index.html#research">← WORKSTATION</a></p><h1>STAGE10</h1><pre class="sourcecode"># Stage 10 — Off-axis transport and ring harvesting (initial integrated build)
+
+Run `python -m examples.run_transport3d` and `pytest -q` from the project root.
+
+## Implemented
+- Nearest-node arbitrary polar/azimuthal impact location on an already deployed 3D shell; projectile still moves vertically and contacts a single node.
+- Mechanical disturbance propagates through the shell&#x27;s mass–spring network to the fixed support ring.
+- Signed integrated mechanical power flux through spring/damper links adjoining the ring (net flux, **not** recoverable energy).
+- Reciprocal piezoelectric transducer dynamics on ring-adjacent links: force `-theta*V` and `C*dV/dt = theta*v_rel - V/R`.
+- Separate electrical capacitor energy, resistor dissipation, structural heat, support-damper heat, and total energy residual.
+- Centered/off-axis/no-piezo experiments and five additional tests.
+
+## Critical limits and incomplete Stage 10 acceptance items
+- Electrical energy is **dissipated in a resistor**, not recovered into a storage circuit. No battery/supercapacitor or saturation feedback yet.
+- The support ring is perfectly fixed, and support mechanical flux is not an independent battery-energy quantity.
+- The shell is a reduced-order network with uncalibrated parameters, not an atomistic or experimentally validated continuum material.
+- No simultaneous deployment/impact coupling: Stage 9&#x27;s prescribed deployment exceeded the example power and force limits and remains unresolved.
+- Off-axis contact uses the nearest surface node and vertical force only, not full sphere–surface contact with friction or tangential momentum.
+- Propagation timing needs dedicated wavefront / sensor measurements and mesh/timestep convergence; energy residual alone does not prove these.
+- Electric conversion is tiny for illustrative parameters; no performance advantage is claimed.
+
+## Next work before Stage 10 sign-off
+Implement a finite storage circuit and load back-reaction; measure wavefront arrival times at multiple latitudes; establish full 3D contact and momentum support reactions; perform timestep/mesh convergence and physical parameter calibration. Keep Stage 11 optimization blocked until these are complete.
+</pre></main></html>

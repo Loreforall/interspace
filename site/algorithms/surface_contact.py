@@ -1,0 +1,69 @@
+"""Stage 11: continuous piecewise-triangular sphere-shell penalty contact.
+
+Contact is frictionless and applies equal-and-opposite forces to the projectile
+and the three triangle vertices using barycentric interpolation.  This is a
+triangulated *surface* model, not a continuum finite-element contact model.
+"""
+import numpy as np
+
+
+def triangles(rings: int, sectors: int):
+    if rings < 2 or sectors < 3: raise ValueError("Invalid mesh")
+    faces=[]
+    for k in range(sectors): faces.append((0,1+k,1+(k+1)%sectors))
+    for j in range(1,rings):
+        a=1+(j-1)*sectors; b=a+sectors
+        for k in range(sectors):
+            l=(k+1)%sectors
+            faces.extend(((a+k,b+k,b+l),(a+k,b+l,a+l)))
+    return np.asarray(faces,dtype=int)
+
+
+def closest_triangle(p,a,b,c):
+    """Closest point and barycentric weights; Ericson Voronoi-region algorithm."""
+    ab=b-a; ac=c-a; ap=p-a; d1=ab@ap; d2=ac@ap
+    if d1<=0 and d2<=0:return a,np.array([1.,0.,0.])
+    bp=p-b;d3=ab@bp;d4=ac@bp
+    if d3>=0 and d4<=d3:return b,np.array([0.,1.,0.])
+    vc=d1*d4-d3*d2
+    if vc<=0 and d1>=0 and d3<=0:
+        v=d1/(d1-d3);return a+v*ab,np.array([1-v,v,0.])
+    cp=p-c;d5=ab@cp;d6=ac@cp
+    if d6>=0 and d5<=d6:return c,np.array([0.,0.,1.])
+    vb=d5*d2-d1*d6
+    if vb<=0 and d2>=0 and d6<=0:
+        w=d2/(d2-d6);return a+w*ac,np.array([1-w,0.,w])
+    va=d3*d6-d5*d4
+    if va<=0 and (d4-d3)>=0 and (d5-d6)>=0:
+        w=(d4-d3)/((d4-d3)+(d5-d6));return b+w*(c-b),np.array([0.,1-w,w])
+    den=1/(va+vb+vc);v=vb*den;w=vc*den
+    return a+ab*v+ac*w,np.array([1-v-w,v,w])
+
+
+def contact(pos,vel,faces,center,projectile_velocity,radius,stiffness,damping=0.):
+    """Nearest surface feature penalty contact (one active face).
+
+    Returns vertex forces, projectile force, elastic energy, viscous heating
+    power, overlap, and face ID. A single active face avoids double-counting
+    contact at shared vertices/edges. It cannot model distributed patches.
+    """
+    if radius<=0 or stiffness<0 or damping<0:raise ValueError('Invalid contact parameters')
+    best=float('inf');winner=None
+    for fid,face in enumerate(faces):
+        a,b,c=pos[face]
+        if np.linalg.norm(np.cross(b-a,c-a))<1e-15:continue
+        point,w=closest_triangle(center,a,b,c)
+        dsq=float(np.sum((center-point)**2))
+        if dsq<best:best=dsq;winner=(fid,face,point,w)
+    forces=np.zeros_like(pos)
+    if winner is None:raise ValueError('No nondegenerate triangles')
+    fid,face,point,w=winner
+    dist=np.sqrt(best);overlap=max(0.,radius-dist)
+    if overlap<=0:return forces,np.zeros(3),0.,0.,0.,fid
+    normal=(center-point)/max(dist,1e-15)
+    surf_velocity=np.einsum('i,ij->j',w,vel[face])
+    approach=max(0.,-float((projectile_velocity-surf_velocity)@normal))
+    mag=stiffness*overlap+damping*approach
+    projectile_force=mag*normal
+    np.add.at(forces,face,-w[:,None]*projectile_force)
+    return forces,projectile_force,.5*stiffness*overlap**2,damping*approach**2,overlap,fid

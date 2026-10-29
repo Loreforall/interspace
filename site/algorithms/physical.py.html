@@ -1,0 +1,63 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>INTERSPACE / SOURCE</title><link rel="stylesheet" href="../style.css"><main><p><a href="../index.html#algorithms">← WORKSTATION / ALGORITHMS</a></p><h1>physical.py</h1><p>Exact source from the Stage 12 research archive. Code is provided for inspection, not executed in-browser.</p><pre class="sourcecode">&quot;&quot;&quot;SI-unit electromechanical impact reference model.
+
+Single effective compression mode with linear piezoelectric coupling.
+This is a realizable class of *material-backed* harvesters, not a free-space shield.
+State: compression x [m], velocity v [m/s], voltage V [V],
+load energy [J], internal heat [J], released heat [J].
+&quot;&quot;&quot;
+from dataclasses import dataclass
+import numpy as np
+
+@dataclass(frozen=True)
+class PhysicalParameters:
+    mass_kg: float = 0.02
+    stiffness_n_m: float = 8000.0
+    damping_ns_m: float = 2.0
+    coupling_n_v: float = 0.03
+    capacitance_f: float = 1e-6
+    resistance_ohm: float = 5000.0
+    initial_velocity_m_s: float = 2.0
+    heat_capacity_j_k: float = 20.0
+    thermal_conductance_w_k: float = 0.5
+    ambient_k: float = 293.15
+
+    def __post_init__(self):
+        for name in (&#x27;mass_kg&#x27;,&#x27;stiffness_n_m&#x27;,&#x27;capacitance_f&#x27;,&#x27;resistance_ohm&#x27;,&#x27;heat_capacity_j_k&#x27;):
+            if getattr(self,name) &lt;= 0: raise ValueError(f&#x27;{name} must be positive&#x27;)
+        for name in (&#x27;damping_ns_m&#x27;,&#x27;thermal_conductance_w_k&#x27;):
+            if getattr(self,name) &lt; 0: raise ValueError(f&#x27;{name} must be nonnegative&#x27;)
+
+def derivatives(y, p):
+    x,v,V,Eload,Qinternal,Qreleased = y
+    # Reciprocity: mechanical coupling force theta*V, electrical current theta*v.
+    dx=v
+    dv=(-p.stiffness_n_m*x-p.damping_ns_m*v-p.coupling_n_v*V)/p.mass_kg
+    dV=(p.coupling_n_v*v-V/p.resistance_ohm)/p.capacitance_f
+    dEload=V*V/p.resistance_ohm
+    # thermal conduction to ambient with initially zero excess temperature
+    dQreleased=p.thermal_conductance_w_k*(Qinternal/p.heat_capacity_j_k)
+    dQinternal=p.damping_ns_m*v*v-dQreleased
+    return np.array([dx,dv,dV,dEload,dQinternal,dQreleased],dtype=float)
+
+def energy(y,p):
+    x,v,V,Eload,Qinternal,Qreleased=np.asarray(y).T
+    return (.5*p.mass_kg*v*v + .5*p.stiffness_n_m*x*x +
+            .5*p.capacitance_f*V*V + Eload + Qinternal + Qreleased)
+
+def run(p=None, duration_s=0.08, dt_s=2e-6):
+    p=p or PhysicalParameters()
+    if duration_s&lt;=0 or dt_s&lt;=0: raise ValueError(&#x27;positive duration and timestep required&#x27;)
+    n=int(np.ceil(duration_s/dt_s)); h=duration_s/n
+    t=np.linspace(0,duration_s,n+1)
+    y=np.zeros((n+1,6)); y[0,1]=p.initial_velocity_m_s
+    for i in range(n):
+        a=derivatives(y[i],p); b=derivatives(y[i]+h*a/2,p)
+        c=derivatives(y[i]+h*b/2,p); d=derivatives(y[i]+h*c,p)
+        y[i+1]=y[i]+h*(a+2*b+2*c+d)/6
+    e=energy(y,p); initial=e[0]
+    return {&#x27;time_s&#x27;:t,&#x27;states&#x27;:y,&#x27;energy_j&#x27;:e,&#x27;initial_energy_j&#x27;:initial,
+            &#x27;max_energy_residual_j&#x27;:float(np.max(np.abs(e-initial))),
+            &#x27;max_relative_energy_residual&#x27;:float(np.max(np.abs(e-initial))/max(initial,1e-30)),
+            &#x27;harvest_fraction&#x27;:float(y[-1,3]/initial) if initial else 0.,
+            &#x27;heat_fraction&#x27;:float((y[-1,4]+y[-1,5])/initial) if initial else 0.}
+</pre></main></html>

@@ -1,0 +1,22 @@
+{
+  "config": {
+    "radius": 0.25,
+    "rings": 9,
+    "sectors": 24,
+    "node_mass": 0.004,
+    "stiffness": 15000.0,
+    "damping": 0.8,
+    "contact_stiffness": 20000.0,
+    "contact_damping": 1.0,
+    "projectile_mass": 0.05,
+    "projectile_radius": 0.025,
+    "impact_speed": 2.0,
+    "dt": 1e-05,
+    "duration": 0.012
+  },
+  "initial_energy_J": 0.1,
+  "max_abs_energy_residual_J": 0.00010297471832917959,
+  "final_projectile_velocity_m_s": -0.8040179479813385,
+  "simulation_duration_s": 0.012,
+  "status": "illustrative numerical baseline; not physically calibrated"
+}
